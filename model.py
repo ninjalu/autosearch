@@ -2,8 +2,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.model_selection import RandomizedSearchCV
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.ensemble import AdaBoostClassifier
-# from xgboost import XGBClassifier
-from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+from xgboost import XGBClassifier
+from sklearn.metrics import f1_score
 import pandas as pd
 
 
@@ -47,7 +47,7 @@ class Ensem_Model:
                 'learning_rate': [0.001, 0.01, 0.1, 0.2]
             },
             'XGB': {
-                'n_estimators': [100, 1000],
+                'n_estimators': [100, 500, 1000],
                 'max_depth': [1, 5, 10],
                 'min_child_weight': [1, 5, 10],
                 'subsample': [0.8, 1],
@@ -60,9 +60,11 @@ class Ensem_Model:
         self.metrics = {
             'RF': None,
             'AB': None,
-            'XGB': None,
-            'ORD': None
+            'XGB': None
         }
+
+        self.best_model = None
+        self.predictions = None
 
     def fit(self, X, y):
         '''
@@ -74,29 +76,78 @@ class Ensem_Model:
         rf_search = RandomizedSearchCV(
             estimator=rf,
             param_distributions=self.hyperP_search['RF'],
-            scoring='roc_auc_ovr',
+            scoring='f1_macro',
             n_iter=200, cv=5, verbose=2, random_state=42, n_jobs=-1)
         rf_search.fit(X, y)
         self.hyperP_best['RF'] = rf_search.best_params_
-        self.metrics['RF'] = {'roc_auc_ovr': rf_search.best_score_}
+        self.metrics['RF'] = {'f1_macro': rf_search.best_score_}
 
         ab = AdaBoostClassifier()
         ab_search = RandomizedSearchCV(
             estimator=ab,
             param_distributions=self.hyperP_search['AB'],
-            scoring='roc_auc_ovr',
+            scoring='f1_macro',
             n_iter=200, cv=5, verbose=2, random_state=42, n_jobs=-1
         )
         ab_search.fit(X, y)
         self.hyperP_best['AB'] = ab_search.best_params_
-        self.metrics['AB'] = {'roc_auc_ovr': ab_search.best_score_}
+        self.metrics['AB'] = {'f1_macro': ab_search.best_score_}
 
-    def ensemble(self):
+        xgb = XGBClassifier()
+        xgb_search = RandomizedSearchCV(
+            estimator=xgb,
+            param_distributions=self.hyperP_search['XGB'],
+            scoring='f1_macro',
+            n_iter=200, cv=5, verbose=2, random_state=42, n_jobs=-1
+        )
+        xgb_search.fit(X, y)
+        self.hyperP_best['XGB'] = xgb_search.best_params_
+        self.metrics['XGB'] = {'f1_macro': xgb_search.best_score_}
+
+    def fit_predict_best_model(self, X, y, X_test):
         '''
-        Find the best combination of ensemble models
-        Return their hyperparameters and evaluation metrics
+        Find the best model
+        Fit the whole training date with the best model
         '''
-        pass
+        if max(self.metrics) == 'RF':
+            rf = RandomForestClassifier(
+                n_estimators=self.hyperP_best['RF']['n_estimators'],
+                min_samples_split=self.hyperP_best['RF']['min_samples_split'],
+                min_samples_leaf=self.hyperP_best['RF']['min_samples_leaf'],
+                max_depth=self.hyperP_best['RF']['max_depth'],
+                bootstrap=self.hyperP_best['RF']['bootstrap'],
+                n_jobs=-1,
+                random_state=42
+            )
+            self.best_model = rf.fit(X, y)
+            self.predictions = rf.predict(X_test)
+            return self.predictions
+
+        elif max(self.metrics) == 'AB':
+            ab = AdaBoostClassifier(
+                n_estimators=self.hyperP_best['AB']['n_estimators'],
+                learning_rate=self.hyperP_best['AB']['learning_rate'],
+                random_state=42
+            )
+
+            self.best_model = ab.fit(X, y)
+            self.predictions = ab.predict(X_test)
+            return self.predictions
+
+        else:
+            xgb = XGBClassifier(
+                n_estimators=self.hyperP_best['XGB']['n_estimators'],
+                subsample=self.hyperP_best['XGB']['subsample'],
+                min_child_weight=self.hyperP_best['XGB']['min_child_weight'],
+                max_depth=self.hyperP_best['XGB']['max_depth'],
+                gamma=self.hyperP_best['XGB']['gamma'],
+                eta=self.hyperP_best['XGB']['eta'],
+                colsample_bytree=self.hyperP_best['XGB']['colsample_bytree']
+            )
+
+            self.best_model = xgb.fit(X, y)
+            self.predictions = xgb.predict(X_test)
+            return self.predictions
 
     def metrics_plot(self):
         '''
